@@ -8,6 +8,7 @@ from ._exceptions import (
     RateLimitError,
     ServerError,
 )
+from ._retry import RetryPolicy, parse_retry_after
 
 __all__ = [
     "ApiError",
@@ -15,6 +16,8 @@ __all__ = [
     "ClientError",
     "NotFoundError",
     "RateLimitError",
+    "RetryPolicy",
     "ServerError",
+    "parse_retry_after",
 ]
 __version__ = "0.1.0"
