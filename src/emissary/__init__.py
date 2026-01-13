@@ -9,6 +9,7 @@ from ._exceptions import (
     ServerError,
 )
 from ._retry import RetryPolicy, parse_retry_after
+from ._transport import Transport
 
 __all__ = [
     "ApiError",
@@ -18,6 +19,7 @@ __all__ = [
     "RateLimitError",
     "RetryPolicy",
     "ServerError",
+    "Transport",
     "parse_retry_after",
 ]
 __version__ = "0.1.0"
