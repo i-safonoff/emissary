@@ -44,3 +44,38 @@ async def test_exhausting_retries_raises_server_error(httpserver: HTTPServer) ->
         retry = RetryPolicy(max_attempts=2, base_delay=0.01, max_delay=0.02)
         with pytest.raises(ServerError):
             await Transport(client, retry=retry).request("GET", "/always-down")
+
+
+async def test_a_post_is_not_retried_by_default(httpserver: HTTPServer) -> None:
+    calls = {"n": 0}
+
+    def handler(_request: Request) -> Response:
+        calls["n"] += 1
+        return Response(status=503)
+
+    httpserver.expect_request("/create", method="POST").respond_with_handler(handler)
+
+    async with httpx.AsyncClient(base_url=httpserver.url_for("")) as client:
+        with pytest.raises(ServerError):
+            await Transport(client, retry=FAST_RETRY).request("POST", "/create")
+
+    assert calls["n"] == 1
+
+
+async def test_a_post_is_retried_when_opted_in(httpserver: HTTPServer) -> None:
+    calls = {"n": 0}
+
+    def handler(_request: Request) -> Response:
+        calls["n"] += 1
+        if calls["n"] < 2:
+            return Response(status=503)
+        return Response(b'{"created": true}', status=201, content_type="application/json")
+
+    httpserver.expect_request("/create", method="POST").respond_with_handler(handler)
+
+    async with httpx.AsyncClient(base_url=httpserver.url_for("")) as client:
+        retry = RetryPolicy(max_attempts=3, base_delay=0.01, max_delay=0.02, idempotent_only=False)
+        response = await Transport(client, retry=retry).request("POST", "/create")
+
+    assert response.json() == {"created": True}
+    assert calls["n"] == 2
