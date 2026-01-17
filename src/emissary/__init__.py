@@ -1,5 +1,6 @@
 """An OOP client framework for external APIs."""
 
+from ._auth import ApiKeyAuth, BearerTokenAuth
 from ._exceptions import (
     ApiError,
     AuthError,
@@ -13,7 +14,9 @@ from ._transport import Transport
 
 __all__ = [
     "ApiError",
+    "ApiKeyAuth",
     "AuthError",
+    "BearerTokenAuth",
     "ClientError",
     "NotFoundError",
     "RateLimitError",
