@@ -1,6 +1,6 @@
 """An OOP client framework for external APIs."""
 
-from ._auth import ApiKeyAuth, BearerTokenAuth
+from ._auth import ApiKeyAuth, BearerTokenAuth, OAuth2ClientCredentialsAuth
 from ._exceptions import (
     ApiError,
     AuthError,
@@ -19,6 +19,7 @@ __all__ = [
     "BearerTokenAuth",
     "ClientError",
     "NotFoundError",
+    "OAuth2ClientCredentialsAuth",
     "RateLimitError",
     "RetryPolicy",
     "ServerError",
