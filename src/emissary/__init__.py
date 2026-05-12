@@ -2,6 +2,7 @@
 
 from ._auth import ApiKeyAuth, BearerTokenAuth, OAuth2ClientCredentialsAuth
 from ._client import ApiClient
+from ._endpoint import EndpointDefinitionError, endpoint
 from ._exceptions import (
     ApiError,
     AuthError,
@@ -20,12 +21,14 @@ __all__ = [
     "AuthError",
     "BearerTokenAuth",
     "ClientError",
+    "EndpointDefinitionError",
     "NotFoundError",
     "OAuth2ClientCredentialsAuth",
     "RateLimitError",
     "RetryPolicy",
     "ServerError",
     "Transport",
+    "endpoint",
     "parse_retry_after",
 ]
 __version__ = "0.1.0"
