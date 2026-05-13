@@ -49,6 +49,20 @@ def endpoint(
                 "either no return annotation (or -> None) or a BaseModel subclass"
             )
 
+        body_params = [
+            name
+            for name, hint in hints.items()
+            if name not in ("self", "return")
+            and isinstance(hint, type)
+            and issubclass(hint, BaseModel)
+        ]
+        if len(body_params) > 1:
+            raise EndpointDefinitionError(
+                f"{func.__qualname__} takes more than one BaseModel parameter "
+                f"({', '.join(body_params)}) -- at most one can be the request body"
+            )
+        body_param = body_params[0] if body_params else None
+
         @functools.wraps(func)
         async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
             bound = signature.bind(self, *args, **kwargs)
@@ -58,7 +72,11 @@ def endpoint(
                 **{name: quote(str(bound.arguments[name]), safe="") for name in path_params}
             )
 
-            response = await self._transport.request(method, url)
+            json_body = None
+            if body_param is not None:
+                json_body = bound.arguments[body_param].model_dump(mode="json")
+
+            response = await self._transport.request(method, url, json=json_body)
             if return_type is None or return_type is type(None):
                 return None
             return return_type.model_validate(response.json())
