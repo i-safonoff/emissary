@@ -12,12 +12,28 @@ class Repo(BaseModel):
     stars: int
 
 
+class NewIssue(BaseModel):
+    title: str
+    body: str
+
+
+class Issue(BaseModel):
+    number: int
+    title: str
+
+
 def _client_for(httpserver: HTTPServer, **kwargs: object) -> ApiClient:
     class Client(ApiClient):
         base_url = httpserver.url_for("")
 
         @endpoint("GET", "/repos/{owner}/{name}")
         async def get_repo(self, owner: str, name: str) -> Repo: ...
+
+        @endpoint("POST", "/repos/{owner}/{name}/issues")
+        async def create_issue(self, owner: str, name: str, body: NewIssue) -> Issue: ...
+
+        @endpoint("DELETE", "/repos/{owner}/{name}")
+        async def delete_repo(self, owner: str, name: str) -> None: ...
 
     return Client(**kwargs)  # type: ignore[arg-type]
 
@@ -54,3 +70,35 @@ async def test_path_params_are_url_escaped(httpserver: HTTPServer) -> None:
 
     assert seen["raw_uri"] == "/repos/octocat/a%2Fb"
     assert repo.name == "a/b"
+
+
+async def test_a_basemodel_parameter_becomes_the_json_body(httpserver: HTTPServer) -> None:
+    seen = {}
+
+    def handler(request: Request) -> Response:
+        seen["json"] = request.get_json()
+        body = b'{"number": 1, "title": "bug"}'
+        return Response(body, status=201, content_type="application/json")
+
+    httpserver.expect_request(
+        "/repos/octocat/hello-world/issues", method="POST"
+    ).respond_with_handler(handler)
+
+    async with _client_for(httpserver) as client:
+        issue = await client.create_issue(  # type: ignore[attr-defined]
+            "octocat", "hello-world", NewIssue(title="bug", body="it broke")
+        )
+
+    assert seen["json"] == {"title": "bug", "body": "it broke"}
+    assert issue == Issue(number=1, title="bug")
+
+
+async def test_no_return_annotation_discards_the_body(httpserver: HTTPServer) -> None:
+    httpserver.expect_request("/repos/octocat/hello-world", method="DELETE").respond_with_data(
+        status=204
+    )
+
+    async with _client_for(httpserver) as client:
+        result = await client.delete_repo("octocat", "hello-world")  # type: ignore[attr-defined]
+
+    assert result is None
