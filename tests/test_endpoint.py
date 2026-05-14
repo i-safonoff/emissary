@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from pytest_httpserver import HTTPServer
 from werkzeug.wrappers import Request, Response
 
-from emissary import ApiClient, endpoint
+from emissary import ApiClient, RetryPolicy, endpoint
 
 
 class Repo(BaseModel):
@@ -29,7 +29,7 @@ def _client_for(httpserver: HTTPServer, **kwargs: object) -> ApiClient:
         @endpoint("GET", "/repos/{owner}/{name}")
         async def get_repo(self, owner: str, name: str) -> Repo: ...
 
-        @endpoint("POST", "/repos/{owner}/{name}/issues")
+        @endpoint("POST", "/repos/{owner}/{name}/issues", idempotent=False)
         async def create_issue(self, owner: str, name: str, body: NewIssue) -> Issue: ...
 
         @endpoint("DELETE", "/repos/{owner}/{name}")
@@ -102,3 +102,45 @@ async def test_no_return_annotation_discards_the_body(httpserver: HTTPServer) ->
         result = await client.delete_repo("octocat", "hello-world")  # type: ignore[attr-defined]
 
     assert result is None
+
+
+async def test_a_get_carries_no_idempotency_key(httpserver: HTTPServer) -> None:
+    seen = {}
+
+    def handler(request: Request) -> Response:
+        seen["header"] = request.headers.get("Idempotency-Key")
+        return Response(b'{"name": "x", "stars": 0}', status=200, content_type="application/json")
+
+    httpserver.expect_request("/repos/octocat/x").respond_with_handler(handler)
+
+    async with _client_for(httpserver) as client:
+        await client.get_repo("octocat", "x")  # type: ignore[attr-defined]
+
+    assert seen["header"] is None
+
+
+async def test_idempotency_key_stays_the_same_across_retries(httpserver: HTTPServer) -> None:
+    keys_seen = []
+
+    def handler(request: Request) -> Response:
+        keys_seen.append(request.headers.get("Idempotency-Key"))
+        if len(keys_seen) < 3:
+            return Response(status=503)
+        body = b'{"number": 1, "title": "bug"}'
+        return Response(body, status=201, content_type="application/json")
+
+    httpserver.expect_request(
+        "/repos/octocat/hello-world/issues", method="POST"
+    ).respond_with_handler(handler)
+
+    async with _client_for(
+        httpserver, retry=RetryPolicy(max_attempts=5, base_delay=0.01, max_delay=0.02)
+    ) as client:
+        issue = await client.create_issue(  # type: ignore[attr-defined]
+            "octocat", "hello-world", NewIssue(title="bug", body="it broke")
+        )
+
+    assert issue == Issue(number=1, title="bug")
+    assert len(keys_seen) == 3
+    assert len(set(keys_seen)) == 1  # every attempt carried the same key
+    assert keys_seen[0] is not None
