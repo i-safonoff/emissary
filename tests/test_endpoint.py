@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import pytest
 from pydantic import BaseModel
 from pytest_httpserver import HTTPServer
 from werkzeug.wrappers import Request, Response
 
-from emissary import ApiClient, RetryPolicy, endpoint
+from emissary import ApiClient, EndpointDefinitionError, RetryPolicy, endpoint
 
 
 class Repo(BaseModel):
@@ -144,3 +145,19 @@ async def test_idempotency_key_stays_the_same_across_retries(httpserver: HTTPSer
     assert len(keys_seen) == 3
     assert len(set(keys_seen)) == 1  # every attempt carried the same key
     assert keys_seen[0] is not None
+
+
+def test_more_than_one_basemodel_parameter_fails_at_decoration_time() -> None:
+    with pytest.raises(EndpointDefinitionError):
+
+        class BadClient(ApiClient):
+            @endpoint("POST", "/thing")
+            async def bad(self, a: NewIssue, b: NewIssue) -> None: ...
+
+
+def test_a_non_basemodel_return_annotation_fails_at_decoration_time() -> None:
+    with pytest.raises(EndpointDefinitionError):
+
+        class BadClient(ApiClient):
+            @endpoint("GET", "/thing")
+            async def bad(self) -> dict[str, str]: ...
