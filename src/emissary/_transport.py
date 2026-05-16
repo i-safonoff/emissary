@@ -19,26 +19,33 @@ class Transport:
         self._client = client
         self._retry = retry or RetryPolicy()
 
-    async def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+    async def request(
+        self, method: str, url: str, *, retry: RetryPolicy | None = None, **kwargs: Any
+    ) -> httpx.Response:
+        # A per-call override, not just the client-wide default: an
+        # endpoint carrying its own idempotency key is safe to retry even
+        # when its method normally wouldn't be -- see endpoint()'s
+        # idempotent= handling.
+        active_retry = retry or self._retry
         attempt = 0
         while True:
             attempt += 1
             try:
                 response = await self._client.request(method, url, **kwargs)
-            except self._retry.retry_on_exceptions:
-                if attempt >= self._retry.max_attempts or not self._retry.allows(method):
+            except active_retry.retry_on_exceptions:
+                if attempt >= active_retry.max_attempts or not active_retry.allows(method):
                     raise
-                await asyncio.sleep(self._retry.delay_for(attempt, None))
+                await asyncio.sleep(active_retry.delay_for(attempt, None))
                 continue
 
             if (
-                response.status_code in self._retry.retry_on_status
-                and attempt < self._retry.max_attempts
-                and self._retry.allows(method)
+                response.status_code in active_retry.retry_on_status
+                and attempt < active_retry.max_attempts
+                and active_retry.allows(method)
             ):
                 await response.aclose()
                 await asyncio.sleep(
-                    self._retry.delay_for(attempt, response.headers.get("retry-after"))
+                    active_retry.delay_for(attempt, response.headers.get("retry-after"))
                 )
                 continue
 
