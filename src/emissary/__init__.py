@@ -11,6 +11,12 @@ from ._exceptions import (
     RateLimitError,
     ServerError,
 )
+from ._pagination import (
+    CursorPagination,
+    LinkHeaderPagination,
+    OffsetPagination,
+    PaginationStrategy,
+)
 from ._retry import RetryPolicy, parse_retry_after
 from ._transport import Transport
 
@@ -21,9 +27,13 @@ __all__ = [
     "AuthError",
     "BearerTokenAuth",
     "ClientError",
+    "CursorPagination",
     "EndpointDefinitionError",
+    "LinkHeaderPagination",
     "NotFoundError",
     "OAuth2ClientCredentialsAuth",
+    "OffsetPagination",
+    "PaginationStrategy",
     "RateLimitError",
     "RetryPolicy",
     "ServerError",
