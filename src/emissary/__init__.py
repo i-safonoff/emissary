@@ -2,7 +2,7 @@
 
 from ._auth import ApiKeyAuth, BearerTokenAuth, OAuth2ClientCredentialsAuth
 from ._client import ApiClient
-from ._endpoint import EndpointDefinitionError, endpoint
+from ._endpoint import EndpointDefinitionError, PaginationLoopError, endpoint
 from ._exceptions import (
     ApiError,
     AuthError,
@@ -33,6 +33,7 @@ __all__ = [
     "NotFoundError",
     "OAuth2ClientCredentialsAuth",
     "OffsetPagination",
+    "PaginationLoopError",
     "PaginationStrategy",
     "RateLimitError",
     "RetryPolicy",
