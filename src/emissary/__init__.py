@@ -3,6 +3,7 @@
 from ._auth import ApiKeyAuth, BearerTokenAuth, OAuth2ClientCredentialsAuth
 from ._client import ApiClient
 from ._endpoint import EndpointDefinitionError, PaginationLoopError, endpoint
+from ._errors import ErrorMapper, JsonFieldErrorMapper
 from ._exceptions import (
     ApiError,
     AuthError,
@@ -29,6 +30,8 @@ __all__ = [
     "ClientError",
     "CursorPagination",
     "EndpointDefinitionError",
+    "ErrorMapper",
+    "JsonFieldErrorMapper",
     "LinkHeaderPagination",
     "NotFoundError",
     "OAuth2ClientCredentialsAuth",
