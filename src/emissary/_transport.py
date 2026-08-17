@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 
+from ._errors import ErrorMapper
 from ._exceptions import exception_for_status
 from ._retry import RetryPolicy
 
@@ -15,9 +16,16 @@ class Transport:
     pass in a client you created, close it yourself.
     """
 
-    def __init__(self, client: httpx.AsyncClient, *, retry: RetryPolicy | None = None) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        retry: RetryPolicy | None = None,
+        error_mapper: ErrorMapper | None = None,
+    ) -> None:
         self._client = client
         self._retry = retry or RetryPolicy()
+        self._error_mapper = error_mapper
 
     async def request(
         self, method: str, url: str, *, retry: RetryPolicy | None = None, **kwargs: Any
@@ -52,6 +60,10 @@ class Transport:
             if response.status_code >= 400:
                 exc_cls = exception_for_status(response.status_code)
                 message = f"{response.status_code} from {method.upper()} {url}"
+                if self._error_mapper is not None:
+                    detail = self._error_mapper.message_for(response)
+                    if detail:
+                        message = f"{message}: {detail}"
                 raise exc_cls(message, status_code=response.status_code, response=response)
 
             return response
