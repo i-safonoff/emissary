@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import httpx
 
 from ._errors import ErrorMapper
 from ._retry import RetryPolicy
 from ._transport import Transport
+
+if TYPE_CHECKING:
+    # typing.Self needs 3.11+; this project supports 3.10. Only used inside
+    # a lazily-evaluated annotation (see __future__ import above), so it's
+    # never actually imported at runtime -- a type-checking-only import
+    # avoids needing typing_extensions as a real dependency just for one
+    # name on one Python version.
+    from typing_extensions import Self
 
 
 class ApiClient:
@@ -38,7 +46,10 @@ class ApiClient:
         if self._owns_client:
             await self._http_client.aclose()
 
-    async def __aenter__(self) -> ApiClient:
+    async def __aenter__(self) -> Self:
+        # Self, not ApiClient: `async with SomeClient(...) as client` needs
+        # client typed as SomeClient, or every subclass-specific method
+        # disappears the moment it's used as a context manager.
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
