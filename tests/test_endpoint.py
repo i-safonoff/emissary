@@ -23,6 +23,16 @@ class Issue(BaseModel):
     title: str
 
 
+class Metadata(BaseModel):
+    order_id: str
+
+
+class NewCustomer(BaseModel):
+    email: str
+    phone: str | None = None
+    metadata: Metadata
+
+
 def _client_for(httpserver: HTTPServer, **kwargs: object) -> ApiClient:
     class Client(ApiClient):
         base_url = httpserver.url_for("")
@@ -145,6 +155,38 @@ async def test_idempotency_key_stays_the_same_across_retries(httpserver: HTTPSer
     assert len(keys_seen) == 3
     assert len(set(keys_seen)) == 1  # every attempt carried the same key
     assert keys_seen[0] is not None
+
+
+async def test_body_encoding_form_sends_flattened_form_data(httpserver: HTTPServer) -> None:
+    # NewCustomer/Metadata are module-level, not defined here, on purpose:
+    # @endpoint resolves annotations with get_type_hints(), which needs a
+    # name reachable from the function's module globals. A class defined
+    # inside this test function wouldn't resolve at all -- a real
+    # constraint on where request/response models can live, not a
+    # decision this test should paper over by not exercising it.
+    seen = {}
+
+    def handler(request: Request) -> Response:
+        seen["content_type"] = request.headers.get("Content-Type", "")
+        seen["form"] = request.form.to_dict()
+        body = b'{"id": "cus_1", "email": "a@example.com"}'
+        return Response(body, status=200, content_type="application/json")
+
+    httpserver.expect_request("/customers", method="POST").respond_with_handler(handler)
+
+    class Client(ApiClient):
+        base_url = httpserver.url_for("")
+
+        @endpoint("POST", "/customers", body_encoding="form")
+        async def create_customer(self, body: NewCustomer) -> None: ...
+
+    async with Client() as client:
+        await client.create_customer(  # type: ignore[attr-defined]
+            NewCustomer(email="a@example.com", metadata=Metadata(order_id="6735"))
+        )
+
+    assert seen["content_type"].startswith("application/x-www-form-urlencoded")
+    assert seen["form"] == {"email": "a@example.com", "metadata[order_id]": "6735"}
 
 
 def test_more_than_one_basemodel_parameter_fails_at_decoration_time() -> None:
