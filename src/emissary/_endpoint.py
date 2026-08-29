@@ -6,11 +6,12 @@ import inspect
 import string
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Callable
-from typing import Any, get_args, get_origin, get_type_hints
+from typing import Any, Literal, get_args, get_origin, get_type_hints
 from urllib.parse import quote
 
 from pydantic import BaseModel
 
+from ._forms import flatten_form
 from ._pagination import PaginationStrategy
 from ._retry import IDEMPOTENT_METHODS, RetryPolicy
 
@@ -63,6 +64,7 @@ def endpoint(
     *,
     idempotent: bool | None = None,
     paginate: PaginationStrategy | None = None,
+    body_encoding: Literal["json", "form"] = "json",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Turn a method on an `ApiClient` subclass into an actual HTTP request.
 
@@ -82,6 +84,11 @@ def endpoint(
     items across as many pages as the strategy says exist. Each page fetch
     goes through the same Transport, so a flaky page mid-pagination retries
     exactly like any other request would.
+
+    `body_encoding` defaults to `"json"`. Not every API takes one: Stripe's
+    v1 API is `application/x-www-form-urlencoded`, with nested objects as
+    bracket-notation keys (`metadata[key]=value`) -- `"form"` sends the
+    request body that way instead.
     """
     resolved_idempotent = (
         idempotent if idempotent is not None else method.upper() in IDEMPOTENT_METHODS
@@ -128,9 +135,13 @@ def endpoint(
                 **{name: quote(str(bound.arguments[name]), safe="") for name in path_params}
             )
 
-            json_body = None
+            body_kwargs: dict[str, Any] = {}
             if body_param is not None:
-                json_body = bound.arguments[body_param].model_dump(mode="json")
+                raw_body = bound.arguments[body_param].model_dump(mode="json")
+                if body_encoding == "form":
+                    body_kwargs["data"] = flatten_form(raw_body)
+                else:
+                    body_kwargs["json"] = raw_body
 
             headers: dict[str, str] = {}
             call_retry: RetryPolicy | None = None
@@ -144,7 +155,7 @@ def endpoint(
                 call_retry = dataclasses.replace(self._retry, idempotent_only=False)
 
             response = await self._transport.request(
-                method, url, json=json_body, headers=headers, retry=call_retry
+                method, url, headers=headers, retry=call_retry, **body_kwargs
             )
             if return_type is None or return_type is type(None):
                 return None
