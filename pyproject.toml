@@ -1,14 +1,14 @@
 [project]
 name = "emissary"
-version = "0.1.0"
+version = "0.2.0"
 description = "An OOP client framework for external APIs -- endpoints as typed objects, retries and pagination handled once"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Ivan Safonov", email = "i.safonoff.dev@gmail.com" }]
-keywords = ["api-client", "httpx", "retry", "pagination", "asyncio"]
+keywords = ["api-client", "httpx", "retry", "pagination", "asyncio", "pydantic", "oauth2"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
