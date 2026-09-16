@@ -48,7 +48,7 @@ in spite of it.
 ## What it does
 
 ```python
-from emissary.examples.github_client import GitHubClient
+from examples.github_client import GitHubClient
 
 async with GitHubClient(token="ghp_...") as gh:
     repo = await gh.get_repo("i-safonoff", "unicall")
@@ -58,7 +58,7 @@ async with GitHubClient(token="ghp_...") as gh:
 ```
 
 ```python
-from emissary.examples.stripe_client import StripeClient, NewCustomer
+from examples.stripe_client import StripeClient, NewCustomer
 
 async with StripeClient(secret_key="sk_test_...") as stripe:
     customer = await stripe.create_customer(NewCustomer(email="a@example.com"))
@@ -201,12 +201,14 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-Or the real ones, with credentials of your own:
+Or the real ones, with credentials of your own. `examples/` ships in the
+repo, not in the installed package — this only imports because it's run
+from the repo root, which Python puts on the path by default:
 
 ```bash
 python -c "
 import asyncio
-from emissary.examples.github_client import GitHubClient
+from examples.github_client import GitHubClient
 
 async def main():
     async with GitHubClient(token='ghp_...') as gh:

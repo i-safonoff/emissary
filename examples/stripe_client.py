@@ -4,7 +4,7 @@ form-encoded bodies instead of JSON, cursor pagination instead of a Link
 header, and an idempotency mechanism this project's own Idempotency-Key
 already matches natively rather than needing to invent one.
 
-    from emissary.examples.stripe_client import StripeClient
+    from examples.stripe_client import StripeClient
 
     async with StripeClient(secret_key="sk_test_...") as stripe:
         customer = await stripe.get_customer("cus_...")

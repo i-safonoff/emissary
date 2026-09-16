@@ -1,7 +1,7 @@
 """A real client against the GitHub REST API, built on emissary -- proof
 the framework holds up against an API this project didn't design.
 
-    from emissary.examples.github_client import GitHubClient
+    from examples.github_client import GitHubClient
 
     async with GitHubClient(token="ghp_...") as gh:
         repo = await gh.get_repo("i-safonoff", "unicall")
