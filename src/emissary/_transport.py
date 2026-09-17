@@ -7,6 +7,7 @@ import httpx
 
 from ._errors import ErrorMapper
 from ._exceptions import exception_for_status
+from ._ratelimit import RateLimiter
 from ._retry import RetryPolicy
 
 
@@ -22,10 +23,12 @@ class Transport:
         *,
         retry: RetryPolicy | None = None,
         error_mapper: ErrorMapper | None = None,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         self._client = client
         self._retry = retry or RetryPolicy()
         self._error_mapper = error_mapper
+        self._rate_limiter = rate_limiter
 
     async def request(
         self, method: str, url: str, *, retry: RetryPolicy | None = None, **kwargs: Any
@@ -38,6 +41,11 @@ class Transport:
         attempt = 0
         while True:
             attempt += 1
+            if self._rate_limiter is not None:
+                # Checked before every attempt, not just the first: the
+                # budget a previous call observed can already be exhausted
+                # before this call's own first request goes out.
+                await self._rate_limiter.wait_if_needed()
             try:
                 response = await self._client.request(method, url, **kwargs)
             except active_retry.retry_on_exceptions:
@@ -45,6 +53,9 @@ class Transport:
                     raise
                 await asyncio.sleep(active_retry.delay_for(attempt, None))
                 continue
+
+            if self._rate_limiter is not None:
+                self._rate_limiter.observe(response)
 
             if (
                 response.status_code in active_retry.retry_on_status
