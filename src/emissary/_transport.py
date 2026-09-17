@@ -7,6 +7,7 @@ import httpx
 
 from ._errors import ErrorMapper
 from ._exceptions import exception_for_status
+from ._hooks import RequestHooks
 from ._ratelimit import RateLimiter
 from ._retry import RetryPolicy
 
@@ -24,11 +25,13 @@ class Transport:
         retry: RetryPolicy | None = None,
         error_mapper: ErrorMapper | None = None,
         rate_limiter: RateLimiter | None = None,
+        hooks: RequestHooks | None = None,
     ) -> None:
         self._client = client
         self._retry = retry or RetryPolicy()
         self._error_mapper = error_mapper
         self._rate_limiter = rate_limiter
+        self._hooks = hooks
 
     async def request(
         self, method: str, url: str, *, retry: RetryPolicy | None = None, **kwargs: Any
@@ -46,13 +49,25 @@ class Transport:
                 # budget a previous call observed can already be exhausted
                 # before this call's own first request goes out.
                 await self._rate_limiter.wait_if_needed()
+            # build_request() + send() instead of the client.request()
+            # convenience method -- the only way to get the real Request
+            # object a hook can look at, since request() builds one
+            # internally and never hands it back.
+            request = self._client.build_request(method, url, **kwargs)
+            if self._hooks is not None:
+                self._hooks.on_request(request, attempt=attempt)
             try:
-                response = await self._client.request(method, url, **kwargs)
-            except active_retry.retry_on_exceptions:
+                response = await self._client.send(request)
+            except active_retry.retry_on_exceptions as exc:
+                if self._hooks is not None:
+                    self._hooks.on_error(request, exc, attempt=attempt)
                 if attempt >= active_retry.max_attempts or not active_retry.allows(method):
                     raise
                 await asyncio.sleep(active_retry.delay_for(attempt, None))
                 continue
+
+            if self._hooks is not None:
+                self._hooks.on_response(response, attempt=attempt)
 
             if self._rate_limiter is not None:
                 self._rate_limiter.observe(response)

@@ -12,6 +12,7 @@ from ._exceptions import (
     RateLimitError,
     ServerError,
 )
+from ._hooks import RequestHooks
 from ._pagination import (
     CursorPagination,
     LinkHeaderPagination,
@@ -42,6 +43,7 @@ __all__ = [
     "RateLimitError",
     "RateLimitHeaders",
     "RateLimiter",
+    "RequestHooks",
     "RetryPolicy",
     "ServerError",
     "Transport",

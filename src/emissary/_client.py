@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, ClassVar
 import httpx
 
 from ._errors import ErrorMapper
+from ._hooks import RequestHooks
 from ._ratelimit import RateLimiter
 from ._retry import RetryPolicy
 from ._transport import Transport
@@ -25,6 +26,7 @@ class ApiClient:
 
     base_url: ClassVar[str] = ""
     error_mapper: ClassVar[ErrorMapper | None] = None
+    hooks: ClassVar[RequestHooks | None] = None
 
     def __init__(
         self,
@@ -33,6 +35,7 @@ class ApiClient:
         retry: RetryPolicy | None = None,
         error_mapper: ErrorMapper | None = None,
         rate_limiter: RateLimiter | None = None,
+        hooks: RequestHooks | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._owns_client = http_client is None
@@ -48,6 +51,7 @@ class ApiClient:
             # mean every instance of a client class silently shared one
             # budget tracker unless a caller remembered to override it.
             rate_limiter=rate_limiter,
+            hooks=hooks or self.hooks,
         )
 
     async def aclose(self) -> None:
