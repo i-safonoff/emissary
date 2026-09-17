@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, ClassVar
 import httpx
 
 from ._errors import ErrorMapper
+from ._ratelimit import RateLimiter
 from ._retry import RetryPolicy
 from ._transport import Transport
 
@@ -31,6 +32,7 @@ class ApiClient:
         auth: httpx.Auth | None = None,
         retry: RetryPolicy | None = None,
         error_mapper: ErrorMapper | None = None,
+        rate_limiter: RateLimiter | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._owns_client = http_client is None
@@ -40,6 +42,12 @@ class ApiClient:
             self._http_client,
             retry=self._retry,
             error_mapper=error_mapper or self.error_mapper,
+            # Constructor-only, deliberately not a ClassVar default like
+            # error_mapper: a RateLimiter carries mutable state (the
+            # observed remaining/reset), and a class-level default would
+            # mean every instance of a client class silently shared one
+            # budget tracker unless a caller remembered to override it.
+            rate_limiter=rate_limiter,
         )
 
     async def aclose(self) -> None:

@@ -18,6 +18,7 @@ from ._pagination import (
     OffsetPagination,
     PaginationStrategy,
 )
+from ._ratelimit import RateLimiter, RateLimitHeaders
 from ._retry import RetryPolicy, parse_retry_after
 from ._transport import Transport
 
@@ -39,6 +40,8 @@ __all__ = [
     "PaginationLoopError",
     "PaginationStrategy",
     "RateLimitError",
+    "RateLimitHeaders",
+    "RateLimiter",
     "RetryPolicy",
     "ServerError",
     "Transport",
