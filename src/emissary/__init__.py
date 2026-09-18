@@ -23,6 +23,11 @@ from ._pagination import (
 from ._ratelimit import RateLimiter, RateLimitHeaders
 from ._retry import RetryPolicy, parse_retry_after
 from ._transport import Transport
+from ._webhooks import (
+    WebhookVerificationError,
+    verify_github_signature,
+    verify_stripe_signature,
+)
 
 __all__ = [
     "ApiClient",
@@ -49,7 +54,10 @@ __all__ = [
     "ServerError",
     "Transport",
     "UploadFile",
+    "WebhookVerificationError",
     "endpoint",
     "parse_retry_after",
+    "verify_github_signature",
+    "verify_stripe_signature",
 ]
 __version__ = "0.2.0"
