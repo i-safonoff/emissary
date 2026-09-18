@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from pydantic import BaseModel
 
-from ._forms import flatten_form
+from ._forms import flatten_form, split_multipart
 from ._pagination import PaginationStrategy
 from ._retry import IDEMPOTENT_METHODS, RetryPolicy
 
@@ -64,7 +64,7 @@ def endpoint(
     *,
     idempotent: bool | None = None,
     paginate: PaginationStrategy | None = None,
-    body_encoding: Literal["json", "form"] = "json",
+    body_encoding: Literal["json", "form", "multipart"] = "json",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Turn a method on an `ApiClient` subclass into an actual HTTP request.
 
@@ -88,7 +88,9 @@ def endpoint(
     `body_encoding` defaults to `"json"`. Not every API takes one: Stripe's
     v1 API is `application/x-www-form-urlencoded`, with nested objects as
     bracket-notation keys (`metadata[key]=value`) -- `"form"` sends the
-    request body that way instead.
+    request body that way instead. `"multipart"` is for a body model with
+    an `UploadFile` field: that field becomes a file part, everything else
+    becomes a form field, same as an HTML file-upload form.
     """
     resolved_idempotent = (
         idempotent if idempotent is not None else method.upper() in IDEMPOTENT_METHODS
@@ -137,11 +139,19 @@ def endpoint(
 
             body_kwargs: dict[str, Any] = {}
             if body_param is not None:
-                raw_body = bound.arguments[body_param].model_dump(mode="json")
-                if body_encoding == "form":
-                    body_kwargs["data"] = flatten_form(raw_body)
+                body_model = bound.arguments[body_param]
+                if body_encoding == "multipart":
+                    # Read by attribute, not model_dump(): a field holding
+                    # raw file bytes has no meaningful JSON form, so
+                    # dumping the model at all would be the wrong move
+                    # before it even got to encoding.
+                    data, files = split_multipart(body_model)
+                    body_kwargs["data"] = data
+                    body_kwargs["files"] = files
+                elif body_encoding == "form":
+                    body_kwargs["data"] = flatten_form(body_model.model_dump(mode="json"))
                 else:
-                    body_kwargs["json"] = raw_body
+                    body_kwargs["json"] = body_model.model_dump(mode="json")
 
             headers: dict[str, str] = {}
             call_retry: RetryPolicy | None = None
