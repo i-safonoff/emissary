@@ -12,6 +12,7 @@ from ._exceptions import (
     RateLimitError,
     ServerError,
 )
+from ._forms import UploadFile
 from ._hooks import RequestHooks
 from ._pagination import (
     CursorPagination,
@@ -47,6 +48,7 @@ __all__ = [
     "RetryPolicy",
     "ServerError",
     "Transport",
+    "UploadFile",
     "endpoint",
     "parse_retry_after",
 ]
