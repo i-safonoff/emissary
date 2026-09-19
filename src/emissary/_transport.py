@@ -9,6 +9,7 @@ import httpx
 from ._errors import ErrorMapper
 from ._exceptions import exception_for_status
 from ._hooks import RequestHooks
+from ._metrics import Stats, _Counters
 from ._ratelimit import RateLimiter
 from ._retry import RetryPolicy
 
@@ -33,6 +34,11 @@ class Transport:
         self._error_mapper = error_mapper
         self._rate_limiter = rate_limiter
         self._hooks = hooks
+        self._counters = _Counters()
+
+    def stats(self) -> Stats:
+        """Snapshot of this Transport's built-in counters."""
+        return self._counters.snapshot()
 
     async def request(
         self, method: str, url: str, *, retry: RetryPolicy | None = None, **kwargs: Any
@@ -44,6 +50,7 @@ class Transport:
         active_retry = retry or self._retry
         start = time.monotonic()
         attempt = 0
+        self._counters.calls_total += 1
         while True:
             attempt += 1
             if self._rate_limiter is not None:
@@ -69,7 +76,9 @@ class Transport:
                     or not active_retry.allows(method)
                     or active_retry.deadline_exceeded(elapsed)
                 ):
+                    self._counters.errors_total += 1
                     raise
+                self._counters.retries_total += 1
                 await asyncio.sleep(self._bounded_delay(active_retry, attempt, start, None))
                 continue
 
@@ -87,11 +96,13 @@ class Transport:
                 and not active_retry.deadline_exceeded(elapsed)
             ):
                 await response.aclose()
+                self._counters.retries_total += 1
                 retry_after = response.headers.get("retry-after")
                 await asyncio.sleep(self._bounded_delay(active_retry, attempt, start, retry_after))
                 continue
 
             if response.status_code >= 400:
+                self._counters.errors_total += 1
                 exc_cls = exception_for_status(response.status_code)
                 message = f"{response.status_code} from {method.upper()} {url}"
                 if self._error_mapper is not None:
