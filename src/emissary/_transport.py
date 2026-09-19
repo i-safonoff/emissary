@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 import httpx
@@ -41,6 +42,7 @@ class Transport:
         # when its method normally wouldn't be -- see endpoint()'s
         # idempotent= handling.
         active_retry = retry or self._retry
+        start = time.monotonic()
         attempt = 0
         while True:
             attempt += 1
@@ -61,9 +63,14 @@ class Transport:
             except active_retry.retry_on_exceptions as exc:
                 if self._hooks is not None:
                     self._hooks.on_error(request, exc, attempt=attempt)
-                if attempt >= active_retry.max_attempts or not active_retry.allows(method):
+                elapsed = time.monotonic() - start
+                if (
+                    attempt >= active_retry.max_attempts
+                    or not active_retry.allows(method)
+                    or active_retry.deadline_exceeded(elapsed)
+                ):
                     raise
-                await asyncio.sleep(active_retry.delay_for(attempt, None))
+                await asyncio.sleep(self._bounded_delay(active_retry, attempt, start, None))
                 continue
 
             if self._hooks is not None:
@@ -72,15 +79,16 @@ class Transport:
             if self._rate_limiter is not None:
                 self._rate_limiter.observe(response)
 
+            elapsed = time.monotonic() - start
             if (
                 response.status_code in active_retry.retry_on_status
                 and attempt < active_retry.max_attempts
                 and active_retry.allows(method)
+                and not active_retry.deadline_exceeded(elapsed)
             ):
                 await response.aclose()
-                await asyncio.sleep(
-                    active_retry.delay_for(attempt, response.headers.get("retry-after"))
-                )
+                retry_after = response.headers.get("retry-after")
+                await asyncio.sleep(self._bounded_delay(active_retry, attempt, start, retry_after))
                 continue
 
             if response.status_code >= 400:
@@ -93,3 +101,18 @@ class Transport:
                 raise exc_cls(message, status_code=response.status_code, response=response)
 
             return response
+
+    @staticmethod
+    def _bounded_delay(
+        retry: RetryPolicy, attempt: int, start: float, retry_after: str | None
+    ) -> float:
+        delay = retry.delay_for(attempt, retry_after)
+        if retry.deadline is None:
+            return delay
+        # Deciding to retry at all already confirmed the deadline hasn't
+        # passed yet -- but the computed backoff can still be longer than
+        # what's left of it. Sleeping the full amount anyway would let the
+        # deadline slip past during the sleep itself, not just during the
+        # next attempt's own request.
+        remaining = retry.deadline - (time.monotonic() - start)
+        return min(delay, max(remaining, 0.0))
