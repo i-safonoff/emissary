@@ -6,6 +6,7 @@ import httpx
 
 from ._errors import ErrorMapper
 from ._hooks import RequestHooks
+from ._metrics import Stats
 from ._ratelimit import RateLimiter
 from ._retry import RetryPolicy
 from ._transport import Transport
@@ -57,6 +58,13 @@ class ApiClient:
     async def aclose(self) -> None:
         if self._owns_client:
             await self._http_client.aclose()
+
+    def stats(self) -> Stats:
+        """Snapshot of this client's built-in counters -- calls, retries,
+        and errors. Always on, no dependency; wire `hooks=` into a real
+        metrics system for anything these three numbers don't cover.
+        """
+        return self._transport.stats()
 
     async def __aenter__(self) -> Self:
         # Self, not ApiClient: `async with SomeClient(...) as client` needs

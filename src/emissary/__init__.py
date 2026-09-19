@@ -14,6 +14,7 @@ from ._exceptions import (
 )
 from ._forms import UploadFile
 from ._hooks import RequestHooks
+from ._metrics import Stats
 from ._pagination import (
     CursorPagination,
     LinkHeaderPagination,
@@ -52,6 +53,7 @@ __all__ = [
     "RequestHooks",
     "RetryPolicy",
     "ServerError",
+    "Stats",
     "Transport",
     "UploadFile",
     "WebhookVerificationError",
