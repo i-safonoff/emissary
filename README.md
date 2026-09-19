@@ -7,7 +7,7 @@ retries and pagination handled once instead of once per integration.**
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![httpx](https://img.shields.io/badge/httpx-native-009688)
 ![Pydantic](https://img.shields.io/badge/pydantic-v2-e92063)
-![Tests](https://img.shields.io/badge/tests-56%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-91%20passing-brightgreen)
 ![Typed](https://img.shields.io/badge/typed-py.typed-informational)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -22,6 +22,7 @@ retries and pagination handled once instead of once per integration.**
 - [Endpoints as objects](#endpoints-as-objects)
 - [Pagination](#pagination)
 - [Proving it against real APIs](#proving-it-against-real-apis)
+- [Going further](#going-further)
 - [The branches](#the-branches)
 - [Quickstart](#quickstart)
 - [Testing it](#testing-it)
@@ -157,6 +158,75 @@ and can't adjust to fit, tested against real (GitHub) and documented
    tests, not by hand.
    [`docs/DECISIONS.md`](docs/DECISIONS.md#9-apiclient-uses-self-not-the-literal-class-name)
 
+## Going further
+
+Six more pieces, added over a few days after the framework had already
+proven itself against GitHub and Stripe — the parts a longer-running
+integration asks for once the basic shape already works.
+
+```python
+from emissary import RateLimiter, RequestHooks, RetryPolicy
+
+class LoggingHooks(RequestHooks):
+    def on_response(self, response, *, attempt):
+        print(response.request.method, response.url, response.status_code, attempt)
+
+client = GitHubClient(
+    token="ghp_...",
+    rate_limiter=RateLimiter(),                 # backs off before a 429, not after
+    hooks=LoggingHooks(),                        # sees every attempt, not just the last
+    retry=RetryPolicy(deadline=10.0),            # a total budget across all retries
+)
+print(client.stats())  # Stats(calls_total=.., retries_total=.., errors_total=..)
+```
+
+10. **A 429 is a failure this library was already retrying — `RateLimiter`
+    tries to make it not happen at all.** Reads an API's own remaining-budget
+    headers (`X-RateLimit-Remaining`/`X-RateLimit-Reset` by default, GitHub's
+    names) and waits before the *next* request once the budget's gone,
+    proactively, instead of only reacting to the 429 once it already
+    arrived. GitHub's `X-RateLimit-Reset` is a UNIX timestamp, not a delay —
+    `RateLimitHeaders(reset_is_absolute=False)` exists because not every API
+    agrees on which. [`test_ratelimit.py`](tests/test_ratelimit.py)
+11. **Seeing the request that actually went out needed retiring
+    `client.request()`.** `RequestHooks.on_request`/`on_response`/`on_error`
+    fire on every attempt, not just the one that finally resolved the
+    call — a retry storm should be visible to whatever's watching, not
+    hidden behind whichever attempt succeeded. Getting the real
+    `httpx.Request` object to hand to a hook meant switching `Transport` to
+    `build_request()` + `send()`, since the convenience method builds one
+    internally and never hands it back.
+    [`test_hooks.py`](tests/test_hooks.py)
+12. **A body model needed a way to carry a file.** `UploadFile` is a plain
+    frozen `dataclass`, not a `BaseModel` — pydantic validates stdlib
+    dataclasses as field types with no extra config — and
+    `body_encoding="multipart"` reads a model's fields by attribute rather
+    than fighting `model_dump()` to serialize raw bytes as JSON.
+    [`test_multipart.py`](tests/test_multipart.py)
+13. **A valid signature over an old timestamp is what a replayed webhook
+    looks like.** `verify_github_signature` and `verify_stripe_signature`
+    check two real, differently-shaped HMAC schemes — GitHub signs the raw
+    body, Stripe signs `"{timestamp}.{payload}"` and expects the timestamp
+    checked separately, since the signature alone can't tell a fresh
+    webhook from a captured-and-replayed one. Both compare with
+    `hmac.compare_digest`, not `==` — a plain string comparison leaks a
+    timing side-channel a determined attacker can use to forge a signature
+    one byte at a time. [`test_webhooks.py`](tests/test_webhooks.py)
+14. **`max_attempts` bounds how many tries happen; nothing bounded how long
+    they take together.** `RetryPolicy.deadline` is a total time budget
+    across every attempt and backoff sleep — a different axis from `httpx`'s
+    own per-request `timeout=`, and the two compose. Checked twice: before
+    deciding to retry at all, and again when computing the sleep, so a
+    generous backoff can't let the deadline slip past during the sleep
+    itself. [`test_retry_deadline.py`](tests/test_retry_deadline.py)
+15. **`retries_total` is the one counter that intentionally breaks its own
+    convention.** `Stats.calls_total`/`errors_total` count logical calls — a
+    flaky request that succeeds on its third try is one call, zero errors —
+    but counting retries the same way would make `retries_total` always
+    zero for anything that eventually succeeded, hiding exactly the number
+    that answers "how much retry overhead is this integration actually
+    costing." [`test_stats.py`](tests/test_stats.py)
+
 ## The branches
 
 | Branch | | |
@@ -166,6 +236,12 @@ and can't adjust to fit, tested against real (GitHub) and documented
 | [`feat/error-mapper`](../../tree/feat/error-mapper) | merged | `ErrorMapper`, problem 8 |
 | [`feat/github-client`](../../tree/feat/github-client) | merged | `GitHubClient`, the `Self` fix (problem 9) |
 | [`feat/stripe-client`](../../tree/feat/stripe-client) | merged | `StripeClient`, `body_encoding="form"` (problem 7) |
+| [`feat/rate-limiter`](../../tree/feat/rate-limiter) | merged | `RateLimiter` (problem 10) |
+| [`feat/request-hooks`](../../tree/feat/request-hooks) | merged | `RequestHooks` (problem 11) |
+| [`feat/multipart`](../../tree/feat/multipart) | merged | `UploadFile`, `body_encoding="multipart"` (problem 12) |
+| [`feat/webhooks`](../../tree/feat/webhooks) | merged | `verify_github_signature`, `verify_stripe_signature` (problem 13) |
+| [`feat/retry-deadline`](../../tree/feat/retry-deadline) | merged | `RetryPolicy.deadline` (problem 14) |
+| [`feat/stats`](../../tree/feat/stats) | merged | `Stats` (problem 15) |
 
 Transport, retries, and auth (problems 1–3) landed straight on `main` —
 before the branch-per-feature habit from this author's other projects
@@ -238,23 +314,27 @@ response bodies locally instead of hitting either API live in CI.
 ```
 src/emissary/
 ├── __init__.py         the public API
-├── _transport.py        retry loop, per-call override
-├── _retry.py            RetryPolicy, Retry-After parsing
+├── _transport.py        retry loop, per-call override, build_request+send for hooks
+├── _retry.py            RetryPolicy, Retry-After parsing, the deadline
 ├── _exceptions.py        the status-code exception hierarchy
 ├── _errors.py            ErrorMapper, JsonFieldErrorMapper
 ├── _auth.py              BearerTokenAuth, ApiKeyAuth, OAuth2ClientCredentialsAuth
 ├── _client.py            ApiClient
 ├── _endpoint.py          @endpoint -- path, body, idempotency, pagination
 ├── _pagination.py        PaginationStrategy and its three shapes
-└── _forms.py             Stripe-style form flattening
+├── _forms.py             form flattening, UploadFile, split_multipart
+├── _ratelimit.py         RateLimiter, RateLimitHeaders
+├── _hooks.py             RequestHooks
+├── _metrics.py           Stats
+└── _webhooks.py          verify_github_signature, verify_stripe_signature
 
 examples/
 ├── github_client.py      Bearer auth, Link-header pagination, JSON
 └── stripe_client.py       Bearer-over-secret-key, cursor pagination, form bodies
 
-tests/                    52 tests against a real local HTTP server
+tests/                    87 tests against a real local HTTP server
 tests/examples/            4 tests against real/documented API response shapes
-docs/DECISIONS.md          nine decisions, with what each gave up
+docs/DECISIONS.md          fifteen decisions, with what each gave up
 ```
 
 ## What I would do differently at scale
@@ -266,19 +346,23 @@ Honest limitations, not a roadmap:
   ever calls a live API, so a real breaking change on either side (a
   renamed field, a changed error shape) would not be caught until it broke
   in production, not in CI.
-- **`body_encoding` is binary.** JSON or form, chosen once per endpoint.
-  An API that mixes both, or needs multipart, isn't served by either.
 - **One `Idempotency-Key` convention.** Header name and value shape (a
   UUID4) match Stripe's and are a reasonable default elsewhere, but an API
   with a different idempotency contract (a client-supplied sequence
   number, say) would need its own mechanism, not a parameter on this one.
-- **No request/response logging or tracing hooks.** Debugging a real
-  integration wants to see the request that actually went out, headers and
-  all; nothing here exposes that short of reading `Transport`'s httpx
-  client directly.
 - **Pagination assumes a single sequential cursor.** None of the three
   strategies handle an API that pages by parallel cursors (per-shard, say)
   or offers no way to resume from a partial failure mid-page.
+- **`RateLimiter` and `Stats` are both per-process.** Two worker processes
+  sharing one API key each track their own view of the remaining budget and
+  their own call counts — neither actually knows what the other has used.
+  A shared budget across processes needs a store both can read and write
+  (Redis, the same shape [`unicall`](https://github.com/i-safonoff/unicall)
+  solves single-process coalescing for), which is a materially bigger
+  design than either of these currently is.
+- **`body_encoding` is one of three, chosen once per endpoint.** JSON,
+  form, or multipart — an API that needs something else entirely (raw
+  binary, XML) isn't served by any of them.
 
 ## License
 

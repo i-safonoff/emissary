@@ -166,3 +166,122 @@ nothing at runtime (the annotation is already lazily evaluated via
 `from __future__ import annotations`) but does add `typing_extensions` as
 an explicit dev dependency rather than trusting it to keep arriving
 transitively through pydantic or httpx.
+
+---
+
+## 10. `RateLimiter` is proactive, and reads the API's own headers rather than tracking a local budget
+
+**Context.** `RetryPolicy` only ever reacts to a 429 after it happened.
+An API that reports its remaining budget on every response (GitHub's
+`X-RateLimit-Remaining`) makes it possible to see the 429 coming instead.
+
+**Decision.** `RateLimiter.observe()` reads the budget from response
+headers after every call and `wait_if_needed()` blocks the *next* call
+once it's exhausted — rather than this library maintaining its own
+request-counting budget independent of what the server reports.
+
+**Cost.** Useless against an API that doesn't send these headers at all,
+and wrong by construction if it lies about them (nothing here can verify
+the number is accurate). The alternative — a client-side token bucket
+sized to the API's documented limit — works without cooperation from the
+server, at the cost of drifting from the true remaining budget the moment
+anything else (a second process, a dashboard someone left open) shares the
+same quota.
+
+---
+
+## 11. `RequestHooks` fire on every attempt, and needed `build_request()` + `send()` instead of `client.request()`
+
+**Context.** Observability for a real integration wants the request that
+was actually sent — headers, body, all of it — not a reconstruction from
+the arguments a caller passed in.
+
+**Decision.** `Transport` calls `client.build_request()` then
+`client.send()` instead of the `client.request()` convenience method, so
+the constructed `httpx.Request` object exists to hand to a hook.
+`on_request`/`on_response`/`on_error` all fire per attempt, not once per
+logical call.
+
+**Cost.** One more moving part matching `httpx.AsyncClient.request()`'s
+own internals by hand (documented as equivalent to `build_request` +
+`send`, but not guaranteed to stay that way across httpx versions). Firing
+per attempt rather than per call means a hook sees every retry
+individually — the right default for debugging a retry storm, but a hook
+that only wants the final outcome has to filter for it itself.
+
+---
+
+## 12. `UploadFile` is a plain dataclass, and `split_multipart` reads fields by attribute
+
+**Context.** `body_encoding="multipart"` needs a way for a body model to
+carry both ordinary fields and raw file bytes, encoded differently.
+
+**Decision.** `UploadFile` is a frozen stdlib `@dataclass`, not a
+`BaseModel` — pydantic validates stdlib dataclasses as field types
+natively, so it works inside a body model with no extra config.
+`split_multipart` reads each field with `getattr`, not `model_dump()`.
+
+**Cost.** `model_dump()` would have been one call instead of a manual
+field loop; skipped because it has no principled way to serialize raw
+bytes as part of a JSON-shaped dump, and coercing it to behave (a custom
+serializer registered just for this type) is more machinery than reading
+attributes directly off a model whose fields are already validated.
+
+---
+
+## 13. Webhook signatures use `hmac.compare_digest` and raise instead of returning a bool
+
+**Context.** `verify_github_signature`/`verify_stripe_signature` compare a
+computed HMAC against the one a webhook sender provided.
+
+**Decision.** The comparison is `hmac.compare_digest`, never `==`, and a
+mismatch raises `WebhookVerificationError` rather than returning `False`.
+
+**Cost.** None, really — `compare_digest` costs nothing an equality check
+doesn't, and raising instead of returning a bool is not a harder API to
+use correctly. Recorded anyway because both are the kind of thing that
+looks like a stylistic choice and isn't: `==` on two strings short-circuits
+at the first differing byte, and the resulting timing difference is a real
+side channel for forging a signature one byte at a time; a bool return is
+a bool a caller can simply not check.
+
+---
+
+## 14. `RetryPolicy.deadline` is a separate axis from httpx's own `timeout=`
+
+**Context.** `max_attempts` bounds how many tries happen; nothing bounded
+how long they're allowed to take in total, and `httpx`'s `timeout=` only
+ever bounds one request at a time.
+
+**Decision.** `deadline` is total seconds across every attempt and every
+backoff sleep, from the first attempt — checked before deciding to retry
+at all, and again when computing the sleep itself, clamping it to
+whatever's left.
+
+**Cost.** Two checks instead of one, and a slightly subtler mental model:
+"this call gave up because of `deadline`" and "this call gave up because
+of `max_attempts`" are different failures with the same exception type,
+distinguishable only by reading `RetryPolicy` — not by anything in the
+exception itself. Accepted rather than adding a distinct exception for a
+deadline cutoff, since either way the caller's real question ("did I get
+an answer or not") has the same answer.
+
+---
+
+## 15. `Stats` counts logical calls, not attempts — except `retries_total`, deliberately
+
+**Context.** `Stats` needed a definition for "one call": a flaky request
+retried twice before succeeding could reasonably be counted as either one
+call or three.
+
+**Decision.** `calls_total` and `errors_total` count logical calls.
+`retries_total` counts attempts beyond the first — the one place this
+project's `Stats` intentionally breaks its own convention.
+
+**Cost.** A metric that reads two different ways depending on which field
+of the same object you look at. Deliberate: `calls_total`/`errors_total`
+answering "how many things did I ask for, how many failed" needs the
+call-level view, but `retries_total` answering the same question at that
+level would just always equal zero for anything that eventually succeeded
+— which is exactly the number that hides how much retry overhead an
+integration is actually paying.
