@@ -53,9 +53,18 @@ class RetryPolicy:
     max_delay: float = 30.0
     jitter: float = 0.2
     idempotent_only: bool = True
+    # Total seconds across every attempt and every backoff sleep, measured
+    # from the first attempt -- not a per-attempt timeout. That's a
+    # different thing (httpx's own timeout=, on the client or per call)
+    # and the two compose: this bounds retry overhead, that bounds how
+    # long any one request is allowed to hang.
+    deadline: float | None = None
 
     def allows(self, method: str) -> bool:
         return not self.idempotent_only or method.upper() in IDEMPOTENT_METHODS
+
+    def deadline_exceeded(self, elapsed: float) -> bool:
+        return self.deadline is not None and elapsed >= self.deadline
 
     def delay_for(self, attempt: int, retry_after: str | None) -> float:
         if retry_after is not None:
